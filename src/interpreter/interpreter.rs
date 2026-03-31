@@ -332,13 +332,11 @@ mod tests {
   }
 
   #[gtest]
-  fn let_bindings_do_not() {
+  fn divide_by_zero() {
     let ast = lex_and_parse_jang_file(
       r#"
         fn main() -> i32 {
-          let x = 1
-          let y = 2
-          ret x + y
+          ret 1 / 0
         }
         "#
       .chars(),
@@ -346,6 +344,22 @@ mod tests {
     .unwrap();
 
     let interp = Interpreter::new(ast);
-    expect_that!(interp.run(), ok(pat![Value::Int32(&3)]));
+    expect_that!(interp.run(), err(anything()));
+  }
+
+  #[gtest]
+  fn mod_by_zero() {
+    let ast = lex_and_parse_jang_file(
+      r#"
+        fn main() -> i32 {
+          ret 1 % 0
+        }
+        "#
+      .chars(),
+    )
+    .unwrap();
+
+    let interp = Interpreter::new(ast);
+    expect_that!(interp.run(), err(anything()));
   }
 }
