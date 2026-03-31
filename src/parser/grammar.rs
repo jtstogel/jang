@@ -167,6 +167,25 @@ grammar!(
 );
 
 #[cfg(test)]
+pub mod testing {
+  use parser_generator::parser::Parser;
+
+  use crate::{
+    error::{JangError, JangResult},
+    parser::{ast::jang_file::JangFile, grammar::JangGrammar, lexer::lex_stream},
+    source_location::SourceLocation,
+  };
+
+  pub fn lex_and_parse_jang_file<I>(jang_text: I) -> JangResult<JangFile>
+  where
+    I: IntoIterator<Item = char>,
+  {
+    JangGrammar::parse_fallible(lex_stream(jang_text))
+      .map_err(|e| JangError::parse_error(format!("{:?}", e), SourceLocation::new(0)))
+  }
+}
+
+#[cfg(test)]
 mod tests {
   use googletest::prelude::*;
   use parser_generator::parser::Parser;
