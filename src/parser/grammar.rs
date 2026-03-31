@@ -6,6 +6,7 @@ use crate::parser::{
     block::{Block, BlockBuilder, NonRetBlock, RetBlock},
     expression::Expression,
     function_decl::{FunctionDecl, FunctionParameter},
+    jang_file::{JangFile, JangFileBuilder},
     statement::{LetStatement, NonRetStatement, RetExpression, RetStatement},
     type_expr::Type,
   },
@@ -21,7 +22,15 @@ grammar!(
   name: JangGrammar;
   enum_terminal: JangToken;
 
-  <root>: FunctionDecl => <function_decl>;
+  <root>: JangFile => <jang_file> { #jang_file.build() };
+
+  <jang_file>: JangFileBuilder => <jang_file> <function_decl> {
+    #jang_file.add_function_decl(#function_decl)
+  };
+  <jang_file>: JangFileBuilder => ! {
+    JangFileBuilder::new()
+  };
+
   <function_decl>: FunctionDecl =>
       Keyword(Keyword::Function)
       <ident>
@@ -150,6 +159,7 @@ mod tests {
         fn_body, fn_name, fn_parameter_name, fn_parameter_type, fn_parameters, fn_return_type,
         fn_return_type_none,
       },
+      jang_file::matchers::{jang_file_functions, jang_file_with_fn},
       statement::matchers::{let_statement as let_stmt, ret_expression as ret_expr},
       type_expr::matchers::type_expr_name,
     },
@@ -170,16 +180,19 @@ mod tests {
     ))
     .unwrap();
 
-    expect_that!(ast, fn_name(ident("function_name")));
-    expect_that!(ast, fn_return_type(type_expr_name(ident("i32"))));
+    expect_that!(ast, jang_file_with_fn(fn_name(ident("function_name"))));
     expect_that!(
       ast,
-      fn_body(block_with_ret(
+      jang_file_with_fn(fn_return_type(type_expr_name(ident("i32"))))
+    );
+    expect_that!(
+      ast,
+      jang_file_with_fn(fn_body(block_with_ret(
         is_empty(),
         ret_expr(lit_exp(integral("123")))
-      ))
+      )))
     );
-    expect_that!(ast, fn_parameters(is_empty()));
+    expect_that!(ast, jang_file_with_fn(fn_parameters(is_empty())));
   }
 
   #[gtest]
@@ -192,10 +205,10 @@ mod tests {
     ))
     .unwrap();
 
-    expect_that!(ast, fn_name(ident("function_name")));
-    expect_that!(ast, fn_return_type_none());
-    expect_that!(ast, fn_body(block(is_empty())));
-    expect_that!(ast, fn_parameters(is_empty()));
+    expect_that!(ast, jang_file_with_fn(fn_name(ident("function_name"))));
+    expect_that!(ast, jang_file_with_fn(fn_return_type_none()));
+    expect_that!(ast, jang_file_with_fn(fn_body(block(is_empty()))));
+    expect_that!(ast, jang_file_with_fn(fn_parameters(is_empty())));
   }
 
   #[gtest]
@@ -227,7 +240,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block_with_ret(is_empty(), ret_expr(id_exp(ident("x")))))
+      jang_file_with_fn(fn_body(block_with_ret(
+        is_empty(),
+        ret_expr(id_exp(ident("x")))
+      )))
     );
   }
 
@@ -247,10 +263,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block_with_ret(
+      jang_file_with_fn(fn_body(block_with_ret(
         is_empty(),
         ret_block(is_empty(), ret_expr(id_exp(ident("x"))))
-      ))
+      )))
     );
   }
 
@@ -268,10 +284,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         lit_exp(integral("123"))
-      )]))
+      )])))
     );
   }
 
@@ -291,13 +307,13 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block_with_ret(
+      jang_file_with_fn(fn_body(block_with_ret(
         elements_are![
           let_stmt(ident("x"), lit_exp(integral("123"))),
           let_stmt(ident("y"), id_exp(ident("x"))),
         ],
         ret_expr(lit_exp(integral("789")))
-      ))
+      )))
     );
   }
 
@@ -326,7 +342,7 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block_with_ret(
+      jang_file_with_fn(fn_body(block_with_ret(
         elements_are![
           non_ret_block(elements_are![let_stmt(ident("y"), id_exp(ident("z")))]),
           let_stmt(ident("x"), lit_exp(integral("123"))),
@@ -338,7 +354,7 @@ mod tests {
             ret_block(is_empty(), ret_expr(id_exp(ident("z"))))
           )
         )
-      ))
+      )))
     );
   }
 
@@ -371,10 +387,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_parameters(elements_are![all!(
+      jang_file_with_fn(fn_parameters(elements_are![all!(
         fn_parameter_name(ident("a")),
         fn_parameter_type(type_expr_name(ident("i32")))
-      )])
+      )]))
     );
   }
 
@@ -392,10 +408,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_parameters(elements_are![
+      jang_file_with_fn(fn_parameters(elements_are![
         all!(fn_parameter_name(ident("a"))),
         all!(fn_parameter_name(ident("b")))
-      ])
+      ]))
     );
   }
 
@@ -413,10 +429,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(id_exp(ident("y")), &BinaryOp::Add, lit_exp(integral("3")))
-      )]))
+      )])))
     );
   }
 
@@ -434,10 +450,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(lit_exp(integral("5")), &BinaryOp::Sub, id_exp(ident("a")),)
-      )]))
+      )])))
     );
   }
 
@@ -455,10 +471,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(lit_exp(integral("2")), &BinaryOp::Mul, id_exp(ident("a")),)
-      )]))
+      )])))
     );
   }
 
@@ -476,10 +492,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(id_exp(ident("a")), &BinaryOp::Div, id_exp(ident("b")),)
-      )]))
+      )])))
     );
   }
 
@@ -497,10 +513,10 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(id_exp(ident("a")), &BinaryOp::Mod, lit_exp(integral("10")))
-      )]))
+      )])))
     );
   }
 
@@ -518,14 +534,14 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(
           bin_exp(id_exp(ident("a")), &BinaryOp::Add, id_exp(ident("b"))),
           &BinaryOp::Add,
           id_exp(ident("c"))
         )
-      )]))
+      )])))
     );
   }
 
@@ -543,14 +559,14 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(
           bin_exp(id_exp(ident("a")), &BinaryOp::Mul, id_exp(ident("b"))),
           &BinaryOp::Mul,
           id_exp(ident("c"))
         )
-      )]))
+      )])))
     );
   }
 
@@ -569,7 +585,7 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![
+      jang_file_with_fn(fn_body(block(elements_are![
         let_stmt(
           ident("add_sub"),
           bin_exp(
@@ -586,7 +602,7 @@ mod tests {
             id_exp(ident("c"))
           )
         )
-      ]))
+      ])))
     );
   }
 
@@ -606,7 +622,7 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![
+      jang_file_with_fn(fn_body(block(elements_are![
         let_stmt(
           ident("mdm"),
           bin_exp(
@@ -643,7 +659,7 @@ mod tests {
             id_exp(ident("d"))
           )
         )
-      ]))
+      ])))
     );
   }
 
@@ -661,14 +677,14 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(
           bin_exp(id_exp(ident("y")), &BinaryOp::Add, id_exp(ident("z"))),
           &BinaryOp::Sub,
           bin_exp(id_exp(ident("w")), &BinaryOp::Mul, lit_exp(integral("3")))
         )
-      )]))
+      )])))
     );
   }
 
@@ -686,10 +702,41 @@ mod tests {
 
     expect_that!(
       ast,
-      fn_body(block(elements_are![let_stmt(
+      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
         ident("x"),
         bin_exp(id_exp(ident("y")), &BinaryOp::Add, id_exp(ident("z")))
-      )]))
+      )])))
+    );
+  }
+
+  #[gtest]
+  fn empty_jang_file() {
+    let ast = JangGrammar::parse_fallible(lex_stream("".chars())).unwrap();
+
+    expect_that!(ast, jang_file_functions(is_empty()));
+  }
+
+  #[gtest]
+  fn multiple_function_jang_file() {
+    let ast = JangGrammar::parse_fallible(lex_stream(
+      r#"
+        fn a() {}
+
+        fn b() {}
+
+        fn c() {}
+        "#
+      .chars(),
+    ))
+    .unwrap();
+
+    expect_that!(
+      ast,
+      jang_file_functions(elements_are![
+        fn_name(ident("a")),
+        fn_name(ident("b")),
+        fn_name(ident("c"))
+      ])
     );
   }
 }
