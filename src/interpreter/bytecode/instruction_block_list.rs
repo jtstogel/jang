@@ -50,7 +50,7 @@ impl<T> BlockListBuilder<T> {
       blocks: self
         .blocks
         .into_iter()
-        .map(|b| b.ok_or_else(|| InterpreterError::generic_err("block not initialized")))
+        .map(|b| b.ok_or_else(|| InterpreterError::internal_err("block not initialized")))
         .collect_result_vec()?,
     })
   }
