@@ -239,7 +239,7 @@ pub mod testing {
   };
 
   pub fn lex_and_parse_jang_file(text: impl IntoIterator<Item = char>) -> JangResult<JangFile> {
-    JangGrammar::parse_fallible(lex_stream(text)).map_err(|e| e.into())
+    Ok(JangGrammar::parse_fallible(lex_stream(text))?)
   }
 }
 
