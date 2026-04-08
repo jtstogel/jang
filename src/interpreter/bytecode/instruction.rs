@@ -1,5 +1,3 @@
-use cknittel_util::builder::Builder;
-
 use crate::{
   interpreter::bytecode::{
     instruction_block_list::{BlockId, BlockList},
@@ -59,13 +57,20 @@ pub enum JitTerminalInstruction {
   Return,
 }
 
-#[derive(Debug, Builder)]
+#[derive(Debug)]
 pub struct ConditionalJumpTargets {
   true_target: BlockId,
   false_target: BlockId,
 }
 
 impl ConditionalJumpTargets {
+  pub fn new(true_target: BlockId, false_target: BlockId) -> Self {
+    Self {
+      true_target,
+      false_target,
+    }
+  }
+
   pub fn true_target(&self) -> BlockId {
     self.true_target
   }
@@ -75,14 +80,18 @@ impl ConditionalJumpTargets {
   }
 }
 
-#[derive(Debug, Builder)]
+#[derive(Debug)]
 pub struct JitCallInstruction {
   arity: u32,
 }
 
 impl JitCallInstruction {
-  pub fn arity(&self) -> usize {
-    self.arity as usize
+  pub fn with_arity(arity: u32) -> Self {
+    Self { arity }
+  }
+
+  pub fn arity(&self) -> u32 {
+    self.arity
   }
 }
 

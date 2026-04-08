@@ -2,8 +2,8 @@ use crate::{
   interpreter::{
     bytecode::{
       instruction::{
-        ConditionalJumpTargetsBuilder, JitCallInstructionBuilder, JitCompiledFunction,
-        JitInstruction, JitInstructionBlock, JitTerminalInstruction,
+        ConditionalJumpTargets, JitCallInstruction, JitCompiledFunction, JitInstruction,
+        JitInstructionBlock, JitTerminalInstruction,
       },
       instruction_block_list::{BlockId, BlockList, BlockListBuilder},
       lexical_scope::JitCompilerLexicalScope,
@@ -232,11 +232,7 @@ impl<'a> OpenCursor<'a> {
       self
         .compile_expr(if_statement.condition())?
         .terminate(JitTerminalInstruction::ConditionalJump(
-          ConditionalJumpTargetsBuilder::default()
-            .with_true_target(if_block_id)
-            .with_false_target(else_block_id)
-            .build()
-            .expect("error building ConditionalJumpTargets"),
+          ConditionalJumpTargets::new(if_block_id, else_block_id),
         ))?
         .start_block(if_block_id)
         .compile_lexical_block(if_statement.body())?
@@ -284,12 +280,9 @@ impl<'a> OpenCursor<'a> {
         .iter()
         .try_fold(self, |cursor, expr| cursor.compile_expr(expr))?
         .compile_expr(call_expression.target())?
-        .emit_instr(JitInstruction::Call(
-          JitCallInstructionBuilder::default()
-            .with_arity(call_expression.argument_list().len() as u32)
-            .build()
-            .expect("internal jit error: incomplete builder"),
-        )),
+        .emit_instr(JitInstruction::Call(JitCallInstruction::with_arity(
+          call_expression.argument_list().len() as u32,
+        ))),
     )
   }
 }
