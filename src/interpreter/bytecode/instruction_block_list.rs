@@ -5,11 +5,6 @@ use crate::interpreter::error::{InterpreterError, InterpreterResult};
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub struct BlockId(usize);
 
-pub struct BlockListBuilder<T> {
-  next_id: BlockId,
-  blocks: Vec<Option<T>>,
-}
-
 #[derive(Debug)]
 pub struct BlockList<T> {
   blocks: Vec<T>,
@@ -19,6 +14,11 @@ impl<T> BlockList<T> {
   pub fn block(&self, id: BlockId) -> Option<&T> {
     self.blocks.get(id.0)
   }
+}
+
+pub struct BlockListBuilder<T> {
+  next_id: BlockId,
+  blocks: Vec<Option<T>>,
 }
 
 impl<T> BlockListBuilder<T> {
@@ -38,7 +38,7 @@ impl<T> BlockListBuilder<T> {
 
   pub fn set(&mut self, block_id: BlockId, block: T) -> InterpreterResult {
     if self.blocks[block_id.0].is_some() {
-      return Err(InterpreterError::generic_err("block already exists"));
+      return Err(InterpreterError::internal_err("block already exists"));
     }
 
     self.blocks[block_id.0] = Some(block);

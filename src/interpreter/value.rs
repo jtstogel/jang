@@ -14,6 +14,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum Value<'a> {
+  Unit,
   Int32(i32),
   Float32(f32),
   JitCompiledFunctionRef(&'a JitCompiledFunction<'a>),
@@ -47,6 +48,7 @@ impl<'a> Value<'a> {
       Self::Int32(_) => "i32".into(),
       Self::Float32(_) => "f32".into(),
       Self::JitCompiledFunctionRef(_) => "<compiled-bytecode>".into(),
+      Self::Unit => "unit".into(),
     }
   }
 
@@ -63,6 +65,7 @@ impl<'a> Value<'a> {
         "non-numeric value: {}",
         self.debug_type_name()
       ))),
+      (Self::Unit, _) => Err(InterpreterError::value_err("unit value, expected numeric")),
     }
   }
 
@@ -145,5 +148,9 @@ pub mod matchers {
 
   pub fn i32_value<'a>(matcher: impl Matcher<&'a i32>) -> impl Matcher<&'a Value<'a>> {
     pat!(Value::Int32(matcher))
+  }
+
+  pub fn unit_value<'a>() -> impl Matcher<&'a Value<'a>> {
+    pat!(Value::Unit)
   }
 }

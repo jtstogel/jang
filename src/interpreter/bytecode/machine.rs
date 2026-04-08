@@ -23,7 +23,7 @@ impl<'a> MachineStack<'a> {
   fn pop_value(&mut self) -> InterpreterResult<Value<'a>> {
     match self.items.pop() {
       Some(v) => Ok(v),
-      None => Err(InterpreterError::generic_err("bad stack: empty")),
+      None => Err(InterpreterError::internal_err("bad stack: empty")),
     }
   }
 
@@ -40,7 +40,7 @@ pub fn evaluate_function<'a>(
   jit_fn: &'a JitCompiledFunction<'a>,
   args: Vec<Value<'a>>,
   context: &'a impl JitFunctionContext<'a>,
-) -> InterpreterResult<Option<Value<'a>>> {
+) -> InterpreterResult<Value<'a>> {
   let mut locals = LocalTable::<Value<'a>>::new();
   let mut stack = MachineStack::from_args(args);
   let mut pc = jit_fn.entrypoint();
@@ -83,11 +83,9 @@ pub fn evaluate_function<'a>(
           }
           args.reverse();
 
-          let value = evaluate_function(target_fn, args, context)?;
-          if let Some(value) = value {
-            stack.push_value(value);
-          }
+          stack.push_value(evaluate_function(target_fn, args, context)?);
         }
+        JitInstruction::LoadUnit => stack.push_value(Value::Unit),
       }
     }
 
@@ -103,8 +101,7 @@ pub fn evaluate_function<'a>(
           cond.false_target()
         };
       }
-      JitTerminalInstruction::RetWithValue => return Ok(Some(stack.pop_value()?)),
-      JitTerminalInstruction::Ret => return Ok(None),
+      JitTerminalInstruction::Return => return stack.pop_value(),
     }
   }
 }
@@ -123,7 +120,10 @@ mod tests {
         machine::evaluate_function,
       },
       error::{InterpreterError, InterpreterResult},
-      value::{Value, matchers::i32_value},
+      value::{
+        Value,
+        matchers::{i32_value, unit_value},
+      },
     },
     parser::{
       ast::binary_expression::BinaryOp,
@@ -147,16 +147,19 @@ mod tests {
 
   #[gtest]
   fn ret_returns_none() {
-    let code = function_bytecode(vec![block(vec![], JitTerminalInstruction::Ret)]);
+    let code = function_bytecode(vec![block(
+      vec![JitInstruction::LoadUnit],
+      JitTerminalInstruction::Return,
+    )]);
     expect_that!(
       evaluate_function(&code, Vec::new(), &EmptyContext),
-      ok(none())
+      ok(unit_value())
     )
   }
 
   #[gtest]
   fn ret_with_value_on_empty_stack_errors() {
-    let code = function_bytecode(vec![block(vec![], JitTerminalInstruction::RetWithValue)]);
+    let code = function_bytecode(vec![block(vec![], JitTerminalInstruction::Return)]);
     expect_that!(
       evaluate_function(&code, Vec::new(), &EmptyContext),
       err(displays_as(contains_substring("bad stack: empty")))
@@ -167,7 +170,7 @@ mod tests {
   fn load_uninitialized_local_errors() {
     let code = function_bytecode(vec![block(
       vec![JitInstruction::LoadLocal(local_id(0))],
-      JitTerminalInstruction::RetWithValue,
+      JitTerminalInstruction::Return,
     )]);
     expect_that!(
       evaluate_function(&code, Vec::new(), &EmptyContext),
@@ -184,12 +187,12 @@ mod tests {
         JitInstruction::StoreLocal(local_id(0)),
         JitInstruction::LoadLocal(local_id(0)),
       ],
-      JitTerminalInstruction::RetWithValue,
+      JitTerminalInstruction::Return,
     )]);
 
     expect_that!(
       evaluate_function(&code, Vec::new(), &EmptyContext),
-      ok(pat!(Some(i32_value(eq(&1))))),
+      ok(i32_value(eq(&1))),
     )
   }
 
@@ -198,7 +201,7 @@ mod tests {
     let global = Ident::new("x");
     let code = function_bytecode(vec![block(
       vec![JitInstruction::LoadGlobal(&global)],
-      JitTerminalInstruction::Ret,
+      JitTerminalInstruction::Return,
     )]);
 
     expect_that!(
@@ -219,12 +222,12 @@ mod tests {
         JitInstruction::LoadLiteral(&one),
         JitInstruction::BinaryOp(BinaryOp::Sub),
       ],
-      JitTerminalInstruction::RetWithValue,
+      JitTerminalInstruction::Return,
     )]);
 
     expect_that!(
       evaluate_function(&code, Vec::new(), &EmptyContext),
-      ok(pat!(Some(i32_value(eq(&1))))),
+      ok(i32_value(eq(&1))),
     )
   }
 }

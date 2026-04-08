@@ -150,6 +150,12 @@ impl<'a> OpenCursor<'a> {
     }
   }
 
+  fn return_unit(self) -> InterpreterResult<ClosedCursor<'a>> {
+    self
+      .emit_instr(JitInstruction::LoadUnit)
+      .terminate(JitTerminalInstruction::Return)
+  }
+
   fn terminate(self, terminal: JitTerminalInstruction) -> InterpreterResult<ClosedCursor<'a>> {
     Ok(ClosedCursor {
       fn_builder: self
@@ -186,7 +192,7 @@ impl<'a> OpenCursor<'a> {
       Statement::Ret(ret_statement) => Ok(
         self
           .compile_expr(ret_statement.expr())?
-          .terminate(JitTerminalInstruction::RetWithValue)?
+          .terminate(JitTerminalInstruction::Return)?
           .into(),
       ),
       Statement::CallStatement(call_expression) => {
@@ -340,9 +346,9 @@ impl<'a> Cursor<'a> {
       })
       .compile_lexical_block(fn_decl.body())?;
 
-    // Terminate with an empty ret if not already closed.
+    // Terminate by returning unit value if not already closed.
     let cur = match cur {
-      Cursor::Open(cur) => cur.terminate(JitTerminalInstruction::Ret)?,
+      Cursor::Open(cur) => cur.return_unit()?,
       Cursor::Closed(cur) => cur,
     };
 
@@ -398,9 +404,10 @@ mod tests {
 
     expect_that!(
       compile_to_bytecode(&decl),
-      ok(entry_block(
-        instruction_block(is_empty(), ret_terminator(),)
-      ))
+      ok(entry_block(instruction_block(
+        elements_are![load_unit_instruction()],
+        ret_terminator(),
+      )))
     )
   }
 
@@ -426,7 +433,7 @@ mod tests {
           binary_op_instruction(pat!(BinaryOp::Add)),
           binary_op_instruction(pat!(BinaryOp::Mul)),
         ],
-        ret_with_value_terminator()
+        ret_terminator()
       )))
     )
   }
@@ -469,7 +476,7 @@ mod tests {
           if_block_id,
           instruction_block(
             elements_are![load_literal_instruction(integral("1"))],
-            ret_with_value_terminator()
+            ret_terminator()
           )
         ),
         has_instruction_block(
@@ -478,7 +485,7 @@ mod tests {
         ),
         has_instruction_block(
           join_block_id,
-          instruction_block(anything(), ret_with_value_terminator())
+          instruction_block(anything(), ret_terminator())
         )
       ])
     )
@@ -515,7 +522,7 @@ mod tests {
           store_local_instruction(eq(&local_id(2))),
           load_local_instruction(eq(&local_id(1))),
         ],
-        ret_with_value_terminator()
+        ret_terminator()
       )))
     )
   }
@@ -537,7 +544,8 @@ mod tests {
       ok(entry_block(instruction_block(
         elements_are![
           load_global_instruction(ident("func")),
-          call_instruction(call_with_arity(eq(&0)))
+          call_instruction(call_with_arity(eq(&0))),
+          load_unit_instruction()
         ],
         ret_terminator()
       )))
@@ -567,7 +575,7 @@ mod tests {
           store_local_instruction(eq(&local_id(0))),
           load_local_instruction(eq(&local_id(0))),
         ],
-        ret_with_value_terminator()
+        ret_terminator()
       )))
     )
   }
@@ -592,7 +600,8 @@ mod tests {
           load_literal_instruction(integral("2")),
           load_literal_instruction(integral("3")),
           load_global_instruction(ident("func")),
-          call_instruction(call_with_arity(eq(&3)))
+          call_instruction(call_with_arity(eq(&3))),
+          load_unit_instruction(),
         ],
         ret_terminator()
       )))
@@ -622,7 +631,8 @@ mod tests {
           load_literal_instruction(integral("4")),
           binary_op_instruction(pat!(BinaryOp::Add)),
           load_global_instruction(ident("func")),
-          call_instruction(call_with_arity(eq(&2)))
+          call_instruction(call_with_arity(eq(&2))),
+          load_unit_instruction()
         ],
         ret_terminator()
       )))
@@ -657,7 +667,7 @@ mod tests {
           binary_op_instruction(pat!(BinaryOp::Add)),
           binary_op_instruction(pat!(BinaryOp::Add)),
         ],
-        ret_with_value_terminator()
+        ret_terminator()
       )))
     )
   }
@@ -685,7 +695,7 @@ mod tests {
           load_local_instruction(eq(&local_id(0))),
           call_instruction(call_with_arity(eq(&1))),
         ],
-        ret_with_value_terminator()
+        ret_terminator()
       )))
     )
   }

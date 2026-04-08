@@ -3,9 +3,10 @@ use std::fmt::{Debug, Display};
 #[derive(Clone, Debug)]
 pub enum InterpreterError {
   Generic(String),
+  Internal(String),
   JitCompile(String),
-  Value(String),
   Unimplemented(String),
+  Value(String),
 }
 
 impl InterpreterError {
@@ -13,8 +14,8 @@ impl InterpreterError {
     Self::Generic(message.into())
   }
 
-  pub fn value_err(message: impl Into<String>) -> Self {
-    Self::Value(message.into())
+  pub fn internal_err(message: impl Into<String>) -> Self {
+    Self::Unimplemented(message.into())
   }
 
   pub fn jit_err(message: impl Into<String>) -> Self {
@@ -25,11 +26,16 @@ impl InterpreterError {
     Self::Unimplemented(message.into())
   }
 
+  pub fn value_err(message: impl Into<String>) -> Self {
+    Self::Value(message.into())
+  }
+
   pub fn prefix(self, message: impl Into<String>) -> Self {
     match self {
       InterpreterError::Generic(s) => InterpreterError::Generic(message.into() + &s),
-      InterpreterError::Unimplemented(s) => InterpreterError::Unimplemented(message.into() + &s),
+      InterpreterError::Internal(s) => InterpreterError::Internal(message.into() + &s),
       InterpreterError::JitCompile(s) => InterpreterError::JitCompile(message.into() + &s),
+      InterpreterError::Unimplemented(s) => InterpreterError::Unimplemented(message.into() + &s),
       InterpreterError::Value(s) => InterpreterError::Value(message.into() + &s),
     }
   }
@@ -42,6 +48,9 @@ impl Display for InterpreterError {
       InterpreterError::Unimplemented(s) => write!(f, "Interpreter error: unimplemented: {}", s),
       InterpreterError::JitCompile(s) => write!(f, "Interpreter error in jit compiler: {}", s),
       InterpreterError::Value(s) => write!(f, "Interpreter error for value: {}", s),
+      InterpreterError::Internal(s) => {
+        write!(f, "Interpreter internal error (interpreter bug): {}", s)
+      }
     }
   }
 }

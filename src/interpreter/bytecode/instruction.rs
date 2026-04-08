@@ -30,6 +30,9 @@ pub enum JitInstruction<'a> {
   // Pushes a local onto the stack.
   LoadLocal(LocalId),
 
+  // Pushes the unit value onto the stack.
+  LoadUnit,
+
   // Pops a value off the stack and stores as a local.
   StoreLocal(LocalId),
 
@@ -52,11 +55,8 @@ pub enum JitTerminalInstruction {
   // Pops a value of the stack, jumps based on its true/false value.
   ConditionalJump(ConditionalJumpTargets),
 
-  // Returns without a value.
-  Ret,
-
   // Pops a value off the stack and returns it.
-  RetWithValue,
+  Return,
 }
 
 #[derive(Debug, Builder)]
@@ -86,8 +86,9 @@ impl JitCallInstruction {
   }
 }
 
-// A block is a sequence of instructions that are always executed
-// in order and without interruption, followed by a terminal instruction.
+// A block is a sequence of instructions that are always executed in order
+// (possibly pausing for an external function call)
+// followed by a terminal instruction.
 #[derive(Debug)]
 pub struct JitInstructionBlock<'a> {
   instructions: Vec<JitInstruction<'a>>,
@@ -111,6 +112,7 @@ impl<'a> JitInstructionBlock<'a> {
   }
 }
 
+// A set of executable instructions.
 #[derive(Debug)]
 pub struct JitCompiledFunction<'a> {
   entrypoint: BlockId,
@@ -159,6 +161,10 @@ pub mod matchers {
       |lit: &&'a Literal| *lit,
       literal_matcher
     )))
+  }
+
+  pub fn load_unit_instruction<'a>() -> impl Matcher<&'a JitInstruction<'a>> {
+    pat!(JitInstruction::LoadUnit)
   }
 
   pub fn load_global_instruction<'a>(
@@ -237,11 +243,7 @@ pub mod matchers {
   }
 
   pub fn ret_terminator<'a>() -> impl Matcher<&'a JitTerminalInstruction> {
-    pat!(JitTerminalInstruction::Ret)
-  }
-
-  pub fn ret_with_value_terminator<'a>() -> impl Matcher<&'a JitTerminalInstruction> {
-    pat!(JitTerminalInstruction::RetWithValue)
+    pat!(JitTerminalInstruction::Return)
   }
 
   pub fn instruction_block<'a>(

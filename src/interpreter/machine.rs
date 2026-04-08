@@ -35,7 +35,7 @@ impl<'a> JitFunctionContext<'a> for Interpreter<'a> {
       self
         .program
         .lookup_function(name)
-        .ok_or_else(|| InterpreterError::generic_err(format!("unbound variable: {}", name)))?,
+        .ok_or_else(|| InterpreterError::internal_err(format!("unbound variable: {}", name)))?,
     ))
   }
 }
@@ -61,9 +61,9 @@ impl<'a> Interpreter<'a> {
     };
 
     match machine::evaluate_function(main_fn, Vec::new(), self)? {
-      Some(Value::Int32(v)) => Ok(v),
-      None => Err(InterpreterError::value_err("main must return a value")),
-      Some(r) => Err(InterpreterError::value_err(format!(
+      Value::Int32(v) => Ok(v),
+      Value::Unit => Err(InterpreterError::value_err("main must return a value")),
+      r => Err(InterpreterError::value_err(format!(
         "invalid return value from main: {:?}",
         r
       ))),

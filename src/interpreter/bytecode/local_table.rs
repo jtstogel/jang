@@ -27,8 +27,8 @@ impl<T> LocalTable<T> {
   pub fn read(&self, local_id: LocalId) -> InterpreterResult<&T> {
     match self.slots.get(local_id.0) {
       Some(LocalSlot::Val(value)) => Ok(value),
-      Some(LocalSlot::Uninitialized) => Err(InterpreterError::generic_err("uninitialized local")),
-      None => Err(InterpreterError::generic_err("bad local read")),
+      Some(LocalSlot::Uninitialized) => Err(InterpreterError::internal_err("uninitialized local")),
+      None => Err(InterpreterError::internal_err("bad local read")),
     }
   }
 
