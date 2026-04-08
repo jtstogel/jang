@@ -1,7 +1,10 @@
 use crate::{
   interpreter::{
     bytecode::{
-      instruction::{JitCompiledFunction, JitInstruction, JitTerminalInstruction},
+      instruction::{
+        JitCompiledFunction, JitInstruction, JitInstructionBlock, JitTerminalInstruction,
+      },
+      instruction_block_list::BlockId,
       local_table::LocalTable,
     },
     error::{InterpreterError, InterpreterResult},
@@ -36,25 +39,89 @@ pub trait JitFunctionContext<'a> {
   fn resolve_ident(&'a self, name: &'_ Ident) -> InterpreterResult<Value<'a>>;
 }
 
+#[derive(Clone, Copy)]
+enum CurrentInstruction<'a> {
+  Instr(&'a JitInstruction<'a>),
+  Term(&'a JitTerminalInstruction),
+}
+
+struct JitInstructionBlockCursor<'a> {
+  block: &'a JitInstructionBlock<'a>,
+  instr_index: usize,
+}
+
+impl<'a> JitInstructionBlockCursor<'a> {
+  fn start_of(block: &'a JitInstructionBlock<'a>) -> Self {
+    Self {
+      block,
+      instr_index: 0,
+    }
+  }
+
+  fn next_instruction(&mut self) -> CurrentInstruction<'a> {
+    let idx = self.instr_index;
+    self.instr_index += 1;
+
+    if let Some(instr) = self.block.instructions().get(idx) {
+      CurrentInstruction::Instr(instr)
+    } else {
+      CurrentInstruction::Term(self.block.terminator())
+    }
+  }
+}
+
+struct JitCallFrame<'a> {
+  jit_fn: &'a JitCompiledFunction<'a>,
+  locals: LocalTable<Value<'a>>,
+  stack: MachineStack<'a>,
+  block_cursor: JitInstructionBlockCursor<'a>,
+}
+
+impl<'a> JitCallFrame<'a> {
+  fn from_call(
+    jit_fn: &'a JitCompiledFunction<'a>,
+    args: Vec<Value<'a>>,
+  ) -> InterpreterResult<Self> {
+    let entrypoint = jit_fn
+      .block(jit_fn.entrypoint())
+      .ok_or_else(|| InterpreterError::jit_err("entrypoint block must exist"))?;
+    Ok(Self {
+      jit_fn,
+      locals: LocalTable::<Value<'a>>::new(),
+      stack: MachineStack::from_args(args),
+      block_cursor: JitInstructionBlockCursor::start_of(entrypoint),
+    })
+  }
+
+  fn next_instruction(&mut self) -> CurrentInstruction<'a> {
+    self.block_cursor.next_instruction()
+  }
+
+  fn switch_to_block(&mut self, id: BlockId) -> InterpreterResult {
+    let block = self
+      .jit_fn
+      .block(id)
+      .ok_or_else(|| InterpreterError::jit_err("entrypoint block must exist"))?;
+    self.block_cursor = JitInstructionBlockCursor::start_of(block);
+    Ok(())
+  }
+}
+
 pub fn evaluate_function<'a>(
   jit_fn: &'a JitCompiledFunction<'a>,
   args: Vec<Value<'a>>,
   context: &'a impl JitFunctionContext<'a>,
 ) -> InterpreterResult<Value<'a>> {
-  let mut locals = LocalTable::<Value<'a>>::new();
-  let mut stack = MachineStack::from_args(args);
-  let mut pc = jit_fn.entrypoint();
+  let mut parent_frames: Vec<JitCallFrame> = Vec::new();
+  let mut f = JitCallFrame::from_call(jit_fn, args)?;
 
   loop {
-    let block = jit_fn
-      .block(pc)
-      .ok_or_else(|| InterpreterError::jit_err("block does not exist"))?;
-    for instr in block.instructions() {
-      match instr {
+    match f.next_instruction() {
+      CurrentInstruction::Instr(instr) => match instr {
         JitInstruction::BinaryOp(binary_op) => {
-          let rhs = stack.pop_value()?;
-          let lhs = stack.pop_value()?;
-          stack.push_value(match binary_op {
+          let rhs = f.stack.pop_value()?;
+          let lhs = f.stack.pop_value()?;
+          f.stack.push_value(match binary_op {
             BinaryOp::Add => lhs.add(&rhs)?,
             BinaryOp::Sub => lhs.subtract(&rhs)?,
             BinaryOp::Mul => lhs.multiply(&rhs)?,
@@ -63,57 +130,67 @@ pub fn evaluate_function<'a>(
           });
         }
         JitInstruction::LoadLiteral(literal) => {
-          stack.push_value(Value::from_literal(literal)?);
+          f.stack.push_value(Value::from_literal(literal)?);
         }
         JitInstruction::LoadGlobal(ident) => {
-          stack.push_value(context.resolve_ident(ident)?);
+          f.stack.push_value(context.resolve_ident(ident)?);
         }
         JitInstruction::LoadLocal(local_id) => {
-          stack.push_value(locals.read(*local_id)?.clone());
+          f.stack.push_value(f.locals.read(*local_id)?.clone());
         }
+        JitInstruction::LoadUnit => f.stack.push_value(Value::Unit),
         JitInstruction::StoreLocal(local_id) => {
-          locals.write(*local_id, stack.pop_value()?);
+          f.locals.write(*local_id, f.stack.pop_value()?);
         }
         JitInstruction::Call(call_instr) => {
-          let target_fn = stack.pop_value()?.as_jit_function()?;
+          let target_fn = f.stack.pop_value()?.as_jit_function()?;
 
           let mut args = Vec::new();
           for _ in 0..call_instr.arity() {
-            args.push(stack.pop_value()?);
+            args.push(f.stack.pop_value()?);
           }
           args.reverse();
 
-          stack.push_value(evaluate_function(target_fn, args, context)?);
+          parent_frames.push(f);
+          f = JitCallFrame::from_call(target_fn, args)?;
         }
-        JitInstruction::LoadUnit => stack.push_value(Value::Unit),
-      }
-    }
-
-    match block.terminator() {
-      JitTerminalInstruction::Jump(block_id) => {
-        pc = *block_id;
-      }
-      JitTerminalInstruction::ConditionalJump(cond) => {
-        let condition = stack.pop_value()?;
-        pc = if condition.is_truthy()? {
-          cond.true_target()
-        } else {
-          cond.false_target()
-        };
-      }
-      JitTerminalInstruction::Return => return stack.pop_value(),
+      },
+      CurrentInstruction::Term(term) => match term {
+        JitTerminalInstruction::Jump(block_id) => {
+          f.switch_to_block(*block_id)?;
+        }
+        JitTerminalInstruction::ConditionalJump(cond) => {
+          let condition = f.stack.pop_value()?;
+          if condition.is_truthy()? {
+            f.switch_to_block(cond.true_target())?;
+          } else {
+            f.switch_to_block(cond.false_target())?;
+          };
+        }
+        JitTerminalInstruction::Return => {
+          let value = f.stack.pop_value()?;
+          if let Some(parent) = parent_frames.pop() {
+            f = parent;
+            f.stack.push_value(value);
+          } else {
+            return Ok(value);
+          }
+        }
+      },
     }
   }
 }
 
 #[cfg(test)]
 mod tests {
+  use std::collections::HashMap;
+
   use super::JitFunctionContext;
   use crate::{
     interpreter::{
       bytecode::{
         instruction::{
-          JitInstruction, JitTerminalInstruction,
+          JitCallInstructionBuilder, JitCompiledFunction, JitInstruction, JitTerminalInstruction,
           testing::{block, function_bytecode},
         },
         local_table::testing::local_id,
@@ -145,23 +222,37 @@ mod tests {
     }
   }
 
+  #[derive(Default)]
+  struct ConstContext<'a> {
+    vals: HashMap<Ident, Value<'a>>,
+  }
+
+  impl<'a> JitFunctionContext<'a> for ConstContext<'a> {
+    fn resolve_ident(&'a self, name: &'_ Ident) -> InterpreterResult<Value<'a>> {
+      self.vals.get(name).cloned().ok_or_else(|| {
+        InterpreterError::generic_err(format!("not found in test context: {name:?}"))
+      })
+    }
+  }
+
+  fn evaluate_unary_fn<'a>(jit_fn: &'a JitCompiledFunction<'a>) -> InterpreterResult<Value<'a>> {
+    evaluate_function(jit_fn, Vec::new(), &EmptyContext)
+  }
+
   #[gtest]
   fn ret_returns_none() {
     let code = function_bytecode(vec![block(
       vec![JitInstruction::LoadUnit],
       JitTerminalInstruction::Return,
     )]);
-    expect_that!(
-      evaluate_function(&code, Vec::new(), &EmptyContext),
-      ok(unit_value())
-    )
+    expect_that!(evaluate_unary_fn(&code), ok(unit_value()))
   }
 
   #[gtest]
   fn ret_with_value_on_empty_stack_errors() {
     let code = function_bytecode(vec![block(vec![], JitTerminalInstruction::Return)]);
     expect_that!(
-      evaluate_function(&code, Vec::new(), &EmptyContext),
+      evaluate_unary_fn(&code),
       err(displays_as(contains_substring("bad stack: empty")))
     )
   }
@@ -173,7 +264,7 @@ mod tests {
       JitTerminalInstruction::Return,
     )]);
     expect_that!(
-      evaluate_function(&code, Vec::new(), &EmptyContext),
+      evaluate_unary_fn(&code),
       err(displays_as(contains_substring("bad local read")))
     )
   }
@@ -190,10 +281,7 @@ mod tests {
       JitTerminalInstruction::Return,
     )]);
 
-    expect_that!(
-      evaluate_function(&code, Vec::new(), &EmptyContext),
-      ok(i32_value(eq(&1))),
-    )
+    expect_that!(evaluate_unary_fn(&code), ok(i32_value(eq(&1))),)
   }
 
   #[gtest]
@@ -205,7 +293,7 @@ mod tests {
     )]);
 
     expect_that!(
-      evaluate_function(&code, Vec::new(), &EmptyContext),
+      evaluate_unary_fn(&code),
       err(displays_as(contains_substring(
         "not found in empty context"
       ))),
@@ -225,8 +313,48 @@ mod tests {
       JitTerminalInstruction::Return,
     )]);
 
+    expect_that!(evaluate_unary_fn(&code), ok(i32_value(eq(&1))),)
+  }
+
+  #[gtest]
+  fn function_call() {
+    let add_function = function_bytecode(vec![block(
+      vec![
+        JitInstruction::StoreLocal(local_id(0)),
+        JitInstruction::LoadLocal(local_id(0)),
+        JitInstruction::StoreLocal(local_id(1)),
+        JitInstruction::LoadLocal(local_id(1)),
+        JitInstruction::BinaryOp(BinaryOp::Sub),
+      ],
+      JitTerminalInstruction::Return,
+    )]);
+    let add_function_name = Ident::new("sub");
+    let context = ConstContext {
+      vals: HashMap::from([(
+        add_function_name.clone(),
+        Value::JitCompiledFunctionRef(&add_function),
+      )]),
+    };
+
+    let two = Literal::Numeric(NumericLiteral::from_str("2"));
+    let one = Literal::Numeric(NumericLiteral::from_str("1"));
+    let code = function_bytecode(vec![block(
+      vec![
+        JitInstruction::LoadLiteral(&two),
+        JitInstruction::LoadLiteral(&one),
+        JitInstruction::LoadGlobal(&add_function_name),
+        JitInstruction::Call(
+          JitCallInstructionBuilder::default()
+            .with_arity(2)
+            .build()
+            .expect("invalid builder"),
+        ),
+      ],
+      JitTerminalInstruction::Return,
+    )]);
+
     expect_that!(
-      evaluate_function(&code, Vec::new(), &EmptyContext),
+      evaluate_function(&code, Vec::new(), &context),
       ok(i32_value(eq(&1))),
     )
   }

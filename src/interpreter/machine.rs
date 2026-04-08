@@ -312,6 +312,28 @@ mod tests {
   }
 
   #[gtest]
+  fn deeply_recursive_function() {
+    expect_that!(
+      interpret_program(
+        r#"
+        fn solve(n: i32) -> i32 {
+          if n {} else { ret 0 }
+          if n % 3 {} else { ret n + solve(n - 1) }
+          if n % 5 {} else { ret n + solve(n - 1) }
+          ret solve(n - 1)
+        }
+
+        fn main() -> i32 {
+          ret solve(999)
+        }
+        "#
+        .chars()
+      ),
+      ok(eq(&233168))
+    );
+  }
+
+  #[gtest]
   fn errors_if_main_does_not_return_a_value() {
     expect_that!(
       interpret_program(
