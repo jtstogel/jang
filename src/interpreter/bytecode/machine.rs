@@ -2,7 +2,8 @@ use crate::{
   interpreter::{
     bytecode::{
       instruction::{
-        JitCompiledFunction, JitInstruction, JitInstructionBlock, JitTerminalInstruction,
+        ConditionalJumpTargets, JitCompiledFunction, JitInstruction, JitInstructionBlock,
+        JitTerminalInstruction,
       },
       instruction_block_list::BlockId,
       local_table::LocalTable,
@@ -77,6 +78,16 @@ struct JitCallFrame<'a> {
   block_cursor: JitInstructionBlockCursor<'a>,
 }
 
+// Actions that affect which call frames are on the stack.
+enum FrameAction<'a> {
+  Continue,
+  Call {
+    target_fn: &'a JitCompiledFunction<'a>,
+    args: Vec<Value<'a>>,
+  },
+  Return(Value<'a>),
+}
+
 impl<'a> JitCallFrame<'a> {
   fn from_call(
     jit_fn: &'a JitCompiledFunction<'a>,
@@ -85,6 +96,7 @@ impl<'a> JitCallFrame<'a> {
     let entrypoint = jit_fn
       .block(jit_fn.entrypoint())
       .ok_or_else(|| InterpreterError::jit_err("entrypoint block must exist"))?;
+
     Ok(Self {
       jit_fn,
       locals: LocalTable::<Value<'a>>::new(),
@@ -97,13 +109,146 @@ impl<'a> JitCallFrame<'a> {
     self.block_cursor.next_instruction()
   }
 
-  fn switch_to_block(&mut self, id: BlockId) -> InterpreterResult {
+  fn switch_to_block(&mut self, id: BlockId) -> InterpreterResult<()> {
     let block = self
       .jit_fn
       .block(id)
-      .ok_or_else(|| InterpreterError::jit_err("entrypoint block must exist"))?;
+      .ok_or_else(|| InterpreterError::jit_err("target block must exist"))?;
     self.block_cursor = JitInstructionBlockCursor::start_of(block);
     Ok(())
+  }
+
+  fn step(
+    &mut self,
+    context: &'a impl JitFunctionContext<'a>,
+  ) -> InterpreterResult<FrameAction<'a>> {
+    match self.next_instruction() {
+      CurrentInstruction::Instr(instr) => match instr {
+        JitInstruction::BinaryOp(op) => {
+          self.execute_binary_operation(op)?;
+        }
+        JitInstruction::LoadLiteral(literal) => {
+          self.stack.push_value(Value::from_literal(literal)?);
+        }
+        JitInstruction::LoadGlobal(ident) => {
+          self.stack.push_value(context.resolve_ident(ident)?);
+        }
+        JitInstruction::LoadLocal(local_id) => {
+          self.stack.push_value(self.locals.read(*local_id)?.clone());
+        }
+        JitInstruction::LoadUnit => {
+          self.stack.push_value(Value::Unit);
+        }
+        JitInstruction::StoreLocal(local_id) => {
+          self.locals.write(*local_id, self.stack.pop_value()?);
+        }
+        JitInstruction::Call(call_instr) => {
+          let target_fn = self.stack.pop_value()?.as_jit_function()?;
+          let args = self.pop_call_args(call_instr.arity() as usize)?;
+          return Ok(FrameAction::Call { target_fn, args });
+        }
+      },
+      CurrentInstruction::Term(term) => match term {
+        JitTerminalInstruction::Jump(block_id) => {
+          self.switch_to_block(*block_id)?;
+        }
+        JitTerminalInstruction::ConditionalJump(targets) => {
+          self.execute_conditional_jump(targets)?;
+        }
+        JitTerminalInstruction::Return => {
+          return Ok(FrameAction::Return(self.stack.pop_value()?));
+        }
+      },
+    }
+
+    Ok(FrameAction::Continue)
+  }
+
+  fn execute_binary_operation(&mut self, op: &BinaryOp) -> InterpreterResult<()> {
+    let rhs = self.stack.pop_value()?;
+    let lhs = self.stack.pop_value()?;
+    let value = match op {
+      BinaryOp::Add => lhs.add(&rhs)?,
+      BinaryOp::Sub => lhs.subtract(&rhs)?,
+      BinaryOp::Mul => lhs.multiply(&rhs)?,
+      BinaryOp::Div => lhs.divide(&rhs)?,
+      BinaryOp::Mod => lhs.modulo(&rhs)?,
+    };
+    self.stack.push_value(value);
+    Ok(())
+  }
+
+  fn execute_conditional_jump(
+    &mut self,
+    targets: &ConditionalJumpTargets,
+  ) -> InterpreterResult<()> {
+    let condition = self.stack.pop_value()?;
+    let target = if condition.is_truthy()? {
+      targets.true_target()
+    } else {
+      targets.false_target()
+    };
+    self.switch_to_block(target)
+  }
+
+  fn pop_call_args(&mut self, arity: usize) -> InterpreterResult<Vec<Value<'a>>> {
+    let mut args = Vec::with_capacity(arity);
+    for _ in 0..arity {
+      args.push(self.stack.pop_value()?);
+    }
+    args.reverse();
+    Ok(args)
+  }
+}
+
+struct Machine<'a> {
+  parent_frames: Vec<JitCallFrame<'a>>,
+  frame: JitCallFrame<'a>,
+}
+
+enum MachineStatus<'a> {
+  Running,
+  Finished(Value<'a>),
+}
+
+impl<'a> Machine<'a> {
+  fn new(jit_fn: &'a JitCompiledFunction<'a>, args: Vec<Value<'a>>) -> InterpreterResult<Self> {
+    Ok(Self {
+      parent_frames: Vec::new(),
+      frame: JitCallFrame::from_call(jit_fn, args)?,
+    })
+  }
+
+  fn push_frame(
+    &mut self,
+    target_fn: &'a JitCompiledFunction<'a>,
+    args: Vec<Value<'a>>,
+  ) -> InterpreterResult<()> {
+    let frame = std::mem::replace(&mut self.frame, JitCallFrame::from_call(target_fn, args)?);
+    self.parent_frames.push(frame);
+    Ok(())
+  }
+
+  fn step(
+    &mut self,
+    context: &'a impl JitFunctionContext<'a>,
+  ) -> InterpreterResult<MachineStatus<'a>> {
+    match self.frame.step(context)? {
+      FrameAction::Continue => Ok(MachineStatus::Running),
+      FrameAction::Call { target_fn, args } => {
+        self.push_frame(target_fn, args)?;
+        Ok(MachineStatus::Running)
+      }
+      FrameAction::Return(value) => {
+        if let Some(parent) = self.parent_frames.pop() {
+          self.frame = parent;
+          self.frame.stack.push_value(value);
+          Ok(MachineStatus::Running)
+        } else {
+          Ok(MachineStatus::Finished(value))
+        }
+      }
+    }
   }
 }
 
@@ -112,71 +257,12 @@ pub fn evaluate_function<'a>(
   args: Vec<Value<'a>>,
   context: &'a impl JitFunctionContext<'a>,
 ) -> InterpreterResult<Value<'a>> {
-  let mut parent_frames: Vec<JitCallFrame> = Vec::new();
-  let mut f = JitCallFrame::from_call(jit_fn, args)?;
+  let mut machine = Machine::new(jit_fn, args)?;
 
   loop {
-    match f.next_instruction() {
-      CurrentInstruction::Instr(instr) => match instr {
-        JitInstruction::BinaryOp(binary_op) => {
-          let rhs = f.stack.pop_value()?;
-          let lhs = f.stack.pop_value()?;
-          f.stack.push_value(match binary_op {
-            BinaryOp::Add => lhs.add(&rhs)?,
-            BinaryOp::Sub => lhs.subtract(&rhs)?,
-            BinaryOp::Mul => lhs.multiply(&rhs)?,
-            BinaryOp::Div => lhs.divide(&rhs)?,
-            BinaryOp::Mod => lhs.modulo(&rhs)?,
-          });
-        }
-        JitInstruction::LoadLiteral(literal) => {
-          f.stack.push_value(Value::from_literal(literal)?);
-        }
-        JitInstruction::LoadGlobal(ident) => {
-          f.stack.push_value(context.resolve_ident(ident)?);
-        }
-        JitInstruction::LoadLocal(local_id) => {
-          f.stack.push_value(f.locals.read(*local_id)?.clone());
-        }
-        JitInstruction::LoadUnit => f.stack.push_value(Value::Unit),
-        JitInstruction::StoreLocal(local_id) => {
-          f.locals.write(*local_id, f.stack.pop_value()?);
-        }
-        JitInstruction::Call(call_instr) => {
-          let target_fn = f.stack.pop_value()?.as_jit_function()?;
-
-          let mut args = Vec::new();
-          for _ in 0..call_instr.arity() {
-            args.push(f.stack.pop_value()?);
-          }
-          args.reverse();
-
-          parent_frames.push(f);
-          f = JitCallFrame::from_call(target_fn, args)?;
-        }
-      },
-      CurrentInstruction::Term(term) => match term {
-        JitTerminalInstruction::Jump(block_id) => {
-          f.switch_to_block(*block_id)?;
-        }
-        JitTerminalInstruction::ConditionalJump(cond) => {
-          let condition = f.stack.pop_value()?;
-          if condition.is_truthy()? {
-            f.switch_to_block(cond.true_target())?;
-          } else {
-            f.switch_to_block(cond.false_target())?;
-          };
-        }
-        JitTerminalInstruction::Return => {
-          let value = f.stack.pop_value()?;
-          if let Some(parent) = parent_frames.pop() {
-            f = parent;
-            f.stack.push_value(value);
-          } else {
-            return Ok(value);
-          }
-        }
-      },
+    match machine.step(context)? {
+      MachineStatus::Running => {}
+      MachineStatus::Finished(value) => return Ok(value),
     }
   }
 }
@@ -318,7 +404,7 @@ mod tests {
 
   #[gtest]
   fn function_call() {
-    let add_function = function_bytecode(vec![block(
+    let sub_function = function_bytecode(vec![block(
       vec![
         JitInstruction::StoreLocal(local_id(0)),
         JitInstruction::LoadLocal(local_id(0)),
@@ -328,11 +414,11 @@ mod tests {
       ],
       JitTerminalInstruction::Return,
     )]);
-    let add_function_name = Ident::new("sub");
+    let sub_function_name = Ident::new("sub");
     let context = ConstContext {
       vals: HashMap::from([(
-        add_function_name.clone(),
-        Value::JitCompiledFunctionRef(&add_function),
+        sub_function_name.clone(),
+        Value::JitCompiledFunctionRef(&sub_function),
       )]),
     };
 
@@ -342,7 +428,7 @@ mod tests {
       vec![
         JitInstruction::LoadLiteral(&two),
         JitInstruction::LoadLiteral(&one),
-        JitInstruction::LoadGlobal(&add_function_name),
+        JitInstruction::LoadGlobal(&sub_function_name),
         JitInstruction::Call(JitCallInstruction::with_arity(2)),
       ],
       JitTerminalInstruction::Return,
