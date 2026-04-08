@@ -112,7 +112,7 @@ impl<'a> JitInstructionBlock<'a> {
   }
 }
 
-// A set of executable instructions.
+// A compiled function, composed logical blocks that contain instruction sequences.
 #[derive(Debug)]
 pub struct JitCompiledFunction<'a> {
   entrypoint: BlockId,
