@@ -190,7 +190,7 @@ mod tests {
     interpreter::{
       bytecode::{
         instruction::{
-          JitCallInstructionBuilder, JitCompiledFunction, JitInstruction, JitTerminalInstruction,
+          JitCallInstruction, JitCompiledFunction, JitInstruction, JitTerminalInstruction,
           testing::{block, function_bytecode},
         },
         local_table::testing::local_id,
@@ -343,12 +343,7 @@ mod tests {
         JitInstruction::LoadLiteral(&two),
         JitInstruction::LoadLiteral(&one),
         JitInstruction::LoadGlobal(&add_function_name),
-        JitInstruction::Call(
-          JitCallInstructionBuilder::default()
-            .with_arity(2)
-            .build()
-            .expect("invalid builder"),
-        ),
+        JitInstruction::Call(JitCallInstruction::with_arity(2)),
       ],
       JitTerminalInstruction::Return,
     )]);
