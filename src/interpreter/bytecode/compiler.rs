@@ -120,7 +120,7 @@ impl<'a> OpenCursor<'a> {
     let entrypoint = fn_builder.entrypoint;
     Self {
       fn_builder,
-      lexical_scope: JitCompilerLexicalScope::new(),
+      lexical_scope: JitCompilerLexicalScope::default(),
       block: JitInstructionBlockBuilder::new(entrypoint),
     }
   }

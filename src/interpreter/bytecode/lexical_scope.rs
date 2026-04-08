@@ -8,10 +8,10 @@ use crate::{
   parser::token::ident::Ident,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct JitCompilerLexicalScope<'a>(Box<JitCompilerLexicalBlock<'a>>);
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct JitCompilerLexicalBlock<'a> {
   parent: Option<JitCompilerLexicalScope<'a>>,
   next_local_id: LocalId,
@@ -19,14 +19,6 @@ struct JitCompilerLexicalBlock<'a> {
 }
 
 impl<'a> JitCompilerLexicalScope<'a> {
-  pub fn new() -> Self {
-    Self(Box::new(JitCompilerLexicalBlock {
-      parent: None,
-      next_local_id: LocalId::default(),
-      locals: HashMap::new(),
-    }))
-  }
-
   pub fn get_binding(&self, name: &Ident) -> Option<LocalId> {
     self
       .0
@@ -37,6 +29,8 @@ impl<'a> JitCompilerLexicalScope<'a> {
   }
 
   pub fn bind(&mut self, name: &'a Ident) -> LocalId {
+    debug_assert!(!self.0.locals.contains_key(name));
+
     let local_id = self.0.next_local_id;
     self.0.next_local_id = local_id.next();
     self.0.locals.insert(name, local_id);

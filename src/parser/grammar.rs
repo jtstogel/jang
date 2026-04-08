@@ -1,37 +1,43 @@
 use parser_generator::pub_grammar;
 
-use crate::parser::{
-  ast::{
-    binary_expression::{BinaryExpression, BinaryOp},
-    block::{Block, BlockBuilder},
-    call_expression::CallExpression,
-    dot_expression::DotExpression,
-    expression::Expression,
-    expression_list::{ExpressionList, ExpressionListBuilder},
-    function_decl::{
-      FunctionDecl, FunctionParameter, FunctionParameters, FunctionParametersBuilder,
+use crate::{
+  error::JangError,
+  parser::{
+    ast::{
+      binary_expression::{BinaryExpression, BinaryOp},
+      block::{Block, BlockBuilder},
+      call_expression::CallExpression,
+      dot_expression::DotExpression,
+      enum_type_decl::{EnumTypeDecl, EnumTypeDeclBuilder, EnumVariant, EnumVariantType},
+      expression::Expression,
+      expression_list::{ExpressionList, ExpressionListBuilder},
+      function_decl::{
+        FunctionDecl, FunctionParameter, FunctionParameters, FunctionParametersBuilder,
+      },
+      if_statement::IfStatement,
+      jang_file::{JangFile, JangFileBuilder},
+      let_statement::LetStatement,
+      loop_statement::LoopStatement,
+      ret_statement::RetStatement,
+      statement::Statement,
+      structured_type_decl::{StructuredTypeDecl, StructuredTypeDeclBuilder, StructuredTypeField},
+      type_decl::{TypeDecl, TypeDeclVariant},
+      type_expr::TypeExpression,
     },
-    if_statement::IfStatement,
-    jang_file::{JangFile, JangFileBuilder},
-    let_statement::LetStatement,
-    loop_statement::LoopStatement,
-    ret_statement::RetStatement,
-    statement::Statement,
-    type_decl::{StructuredTypeDecl, StructuredTypeDeclBuilder, StructuredTypeField, TypeDecl},
-    type_expr::TypeExpression,
-  },
-  token::{
-    JangToken,
-    ident::Ident,
-    keyword::Keyword,
-    literal::Literal,
-    operator::{Op, Operator},
+    token::{
+      JangToken,
+      ident::Ident,
+      keyword::Keyword,
+      literal::Literal,
+      operator::{Op, Operator},
+    },
   },
 };
 
 pub_grammar!(
   name: JangGrammar;
   enum_terminal: JangToken;
+  error_type: JangError;
 
   <root>: JangFile => <jang_file>;
 
@@ -46,14 +52,19 @@ pub_grammar!(
   };
 
   <type_decl>: TypeDecl =>
-    Keyword(Keyword::Type) <ident> <eq> <open_bracket>
-      <structured_type_decl>
-    <close_bracket>
+    Keyword(Keyword::Type) <ident> <eq> <type_decl_variant>
   {
-    TypeDecl::new(#ident, #structured_type_decl)
+    TypeDecl::new(#ident, #type_decl_variant)
   };
 
-  <structured_type_decl>: StructuredTypeDecl => <structured_type_decl_builder>;
+  <type_decl_variant>: TypeDeclVariant => <structured_type_decl>;
+  <type_decl_variant>: TypeDeclVariant => <enum_type_decl>;
+
+  <structured_type_decl>: StructuredTypeDecl =>
+    <open_bracket> <structured_type_decl_builder> <close_bracket>
+  {
+    #structured_type_decl_builder.build()?
+  };
 
   <structured_type_decl_builder>: StructuredTypeDeclBuilder => ! {
     StructuredTypeDeclBuilder::default()
@@ -67,6 +78,29 @@ pub_grammar!(
 
   <structured_type_field>: StructuredTypeField => <ident> <colon> <type_expr> {
     StructuredTypeField::new(#ident, #type_expr)
+  };
+
+  <enum_type_decl>: EnumTypeDecl => <enum_type_decl_builder>;
+
+  <enum_type_decl_builder>: EnumTypeDeclBuilder => <enum_type_decl_variant> {
+    EnumTypeDeclBuilder::default().add_variants(#enum_type_decl_variant)
+  };
+  <enum_type_decl_builder>: EnumTypeDeclBuilder => <enum_type_decl_builder> <enum_type_decl_variant> {
+    #enum_type_decl_builder.add_variants(#enum_type_decl_variant)
+  };
+
+  <enum_type_decl_variant>: EnumVariant => <bar> <ident> <enum_variant_type> {
+    EnumVariant::new(#ident, #enum_variant_type)
+  };
+
+  <enum_variant_type>: EnumVariantType => ! {
+    EnumVariantType::Empty
+  };
+  <enum_variant_type>: EnumVariantType => <ident> {
+    EnumVariantType::TypeRef(#ident)
+  };
+  <enum_variant_type>: EnumVariantType => <structured_type_decl> {
+    EnumVariantType::Structured(#structured_type_decl)
   };
 
   <function_decl>: FunctionDecl =>
@@ -172,12 +206,12 @@ pub_grammar!(
     CallExpression::new(#call_or_dot_expr, #call_args)
   };
 
-  <call_args>: ExpressionList => <open_paren> <expr_list> <close_paren> { #expr_list };
+  <call_args>: ExpressionList => <open_paren> <expr_list_builder> <close_paren> {
+    #expr_list_builder.build()?
+  };
 
   <leaf_expr>: Expression => <open_paren> <expr> <close_paren> { #expr };
   <leaf_expr>: Expression => <ident>;
-
-  <expr_list>: ExpressionList => <expr_list_builder>;
 
   <expr_list_builder>: ExpressionListBuilder => ! { ExpressionListBuilder::default() };
   <expr_list_builder>: ExpressionListBuilder => <non_empty_expr_list>;
@@ -189,10 +223,8 @@ pub_grammar!(
     #non_empty_expr_list.add_expressions(#expr)
   };
 
-  <function_params>: FunctionParameters => <function_params_builder>;
-
-  <function_params_builder>: FunctionParametersBuilder => <open_paren> <parameter_list> <close_paren> {
-    #parameter_list
+  <function_params>: FunctionParameters => <open_paren> <parameter_list> <close_paren> {
+    #parameter_list.build()?
   };
 
   <parameter_list>: FunctionParametersBuilder => ! { FunctionParametersBuilder::default() };
@@ -220,6 +252,7 @@ pub_grammar!(
   <colon> => Operator(Operator { op: Op::Colon });
   <comma> => Operator(Operator { op: Op::Comma });
   <dot> => Operator(Operator { op: Op::Dot });
+  <bar> => Operator(Operator { op: Op::Bar });
   <right_arrow> =>
       Operator(Operator { op: Op::Dash })
       Joint
@@ -250,37 +283,72 @@ mod tests {
   use googletest::prelude::*;
   use parser_generator::parser::Parser;
 
-  use crate::parser::{
-    ast::{
-      binary_expression::{BinaryOp, matchers::binary_expression as bin_exp},
-      block::matchers::{block, block_statement},
-      call_expression::matchers::{
-        call_expr_args, call_expr_target, call_expression, call_statement,
+  use crate::{
+    error::JangResult,
+    parser::{
+      ast::{
+        binary_expression::{BinaryOp, matchers::binary_expression as bin_exp},
+        block::matchers::{block, block_statement},
+        call_expression::matchers::{
+          call_expr_args, call_expr_target, call_expression, call_statement,
+        },
+        dot_expression::matchers::{dot_expr_base, dot_expr_member},
+        enum_type_decl::matchers::{
+          enum_ref_type, enum_structured_type, enum_variant, enum_variant_with,
+        },
+        expression::{
+          Expression,
+          matchers::{ident_expression as id_exp, literal_expression as lit_exp},
+        },
+        function_decl::matchers::{
+          fn_body, fn_name, fn_parameter_name, fn_parameter_type, fn_parameters, fn_return_type,
+          fn_return_type_none,
+        },
+        if_statement::matchers::{
+          if_else_clause, if_else_if_statement, if_else_statement, if_statement,
+        },
+        jang_file::matchers::{jang_file_functions, jang_file_with_fn, jang_file_with_type},
+        let_statement::matchers::let_statement as let_stmt,
+        loop_statement::matchers::loop_statement,
+        ret_statement::matchers::ret_statement as ret_stmt,
+        statement::{Statement, matchers::break_statement},
+        structured_type_decl::matchers::type_field,
+        type_decl::matchers::{enum_type, structured_type},
+        type_expr::matchers::type_expr_name,
       },
-      dot_expression::matchers::{dot_expr_base, dot_expr_member},
-      expression::matchers::{ident_expression as id_exp, literal_expression as lit_exp},
-      function_decl::matchers::{
-        fn_body, fn_name, fn_parameter_name, fn_parameter_type, fn_parameters, fn_return_type,
-        fn_return_type_none,
-      },
-      if_statement::matchers::{
-        if_else_clause, if_else_if_statement, if_else_statement, if_statement,
-      },
-      jang_file::matchers::{jang_file_functions, jang_file_with_fn, jang_file_with_type},
-      let_statement::matchers::let_statement as let_stmt,
-      loop_statement::matchers::loop_statement,
-      ret_statement::matchers::ret_statement as ret_stmt,
-      statement::matchers::break_statement,
-      type_decl::matchers::{structured_type, type_field},
-      type_expr::matchers::type_expr_name,
+      grammar::JangGrammar,
+      lexer::lex_stream,
+      token::{ident::matchers::ident, literal::matchers::integral},
     },
-    grammar::JangGrammar,
-    lexer::lex_stream,
-    token::{ident::matchers::ident, literal::matchers::integral},
   };
 
   fn failed_to_parse<'a, T: Debug, E: Error>() -> impl Matcher<&'a std::result::Result<T, E>> {
     err(displays_as(contains_substring("Failed to parse")))
+  }
+
+  fn parse_single_exp(expression: &str) -> JangResult<Expression> {
+    let ast = JangGrammar::parse_fallible(lex_stream(
+      format!(
+        r#"
+        fn function_name() {{
+          let x = {}
+        }}
+        "#,
+        expression
+      )
+      .chars(),
+    ))?;
+
+    let statement = &ast.function_decls()[0].body().statements()[0];
+    match statement {
+      Statement::Let(stmt) => Ok(stmt.expr().clone()),
+      _ => {
+        panic!(
+          "parse_single_exp expects a let statement, got: {}",
+          statement
+        )
+      }
+    }
   }
 
   #[gtest]
@@ -384,6 +452,107 @@ mod tests {
           type_field(ident("a"), type_expr_name(ident("i32"))),
           type_field(ident("b"), type_expr_name(ident("String"))),
           type_field(ident("c"), type_expr_name(ident("MyCustomType"))),
+        ]
+      ))
+    );
+  }
+
+  #[gtest]
+  fn enum_decl_single_variant() {
+    let ast = JangGrammar::parse_fallible(lex_stream(
+      r#"
+        type E =
+          | V1
+        "#
+      .chars(),
+    ))
+    .unwrap();
+
+    expect_that!(
+      ast,
+      jang_file_with_type(enum_type(
+        ident("E"),
+        elements_are![enum_variant(ident("V1"))]
+      ))
+    );
+  }
+
+  #[gtest]
+  fn enum_decl_single_variant_with_data() {
+    let ast = JangGrammar::parse_fallible(lex_stream(
+      r#"
+        type E =
+          | V1 i32
+        "#
+      .chars(),
+    ))
+    .unwrap();
+
+    expect_that!(
+      ast,
+      jang_file_with_type(enum_type(
+        ident("E"),
+        elements_are![enum_variant_with(ident("V1"), enum_ref_type(ident("i32")))]
+      ))
+    );
+  }
+
+  #[gtest]
+  fn enum_decl_structured_variant() {
+    let ast = JangGrammar::parse_fallible(lex_stream(
+      r#"
+        type E =
+          | V1 { field1: i32 }
+        "#
+      .chars(),
+    ))
+    .unwrap();
+
+    expect_that!(
+      ast,
+      jang_file_with_type(enum_type(
+        ident("E"),
+        elements_are![enum_variant_with(
+          ident("V1"),
+          enum_structured_type(elements_are![type_field(
+            ident("field1"),
+            type_expr_name(ident("i32"))
+          )])
+        )]
+      ))
+    );
+  }
+
+  #[gtest]
+  fn enum_decl_many_variants() {
+    let ast = JangGrammar::parse_fallible(lex_stream(
+      r#"
+        type E =
+          | V1
+          | V2 {
+              f1: i64
+              f2: String
+            }
+          | V3 String
+        "#
+      .chars(),
+    ))
+    .unwrap();
+
+    expect_that!(
+      ast,
+      jang_file_with_type(enum_type(
+        ident("E"),
+        elements_are![
+          enum_variant(ident("V1")),
+          enum_variant_with(
+            ident("V2"),
+            enum_structured_type(elements_are![
+              type_field(ident("f1"), type_expr_name(ident("i64"))),
+              type_field(ident("f2"), type_expr_name(ident("String"))),
+            ])
+          ),
+          enum_variant_with(ident("V3"), enum_ref_type(ident("String"))),
         ]
       ))
     );
@@ -597,221 +766,112 @@ mod tests {
 
   #[gtest]
   fn add_expression() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = y + 3
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "y + 3";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(id_exp(ident("y")), &BinaryOp::Add, lit_exp(integral("3")))
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(id_exp(ident("y")), &BinaryOp::Add, lit_exp(integral("3")))
     );
   }
 
   #[gtest]
   fn sub_expression() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = 5 - a
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "5 - a";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(lit_exp(integral("5")), &BinaryOp::Sub, id_exp(ident("a")),)
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(lit_exp(integral("5")), &BinaryOp::Sub, id_exp(ident("a"))),
     );
   }
 
   #[gtest]
   fn mul_expression() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = 2 * a
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "2 * a";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(lit_exp(integral("2")), &BinaryOp::Mul, id_exp(ident("a")),)
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(lit_exp(integral("2")), &BinaryOp::Mul, id_exp(ident("a")),)
     );
   }
 
   #[gtest]
   fn div_expression() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = a / b
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expression = "a / b";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(id_exp(ident("a")), &BinaryOp::Div, id_exp(ident("b")),)
-      )])))
+      parse_single_exp(expression).unwrap(),
+      bin_exp(id_exp(ident("a")), &BinaryOp::Div, id_exp(ident("b")))
     );
   }
 
   #[gtest]
   fn mod_expression() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = a % 10
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "a % 10";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(id_exp(ident("a")), &BinaryOp::Mod, lit_exp(integral("10")))
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(id_exp(ident("a")), &BinaryOp::Mod, lit_exp(integral("10")))
     );
   }
 
   #[gtest]
   fn add_left_associativity() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = a + b + c
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "a + b + c";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(
-          bin_exp(id_exp(ident("a")), &BinaryOp::Add, id_exp(ident("b"))),
-          &BinaryOp::Add,
-          id_exp(ident("c"))
-        )
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
+        bin_exp(id_exp(ident("a")), &BinaryOp::Add, id_exp(ident("b"))),
+        &BinaryOp::Add,
+        id_exp(ident("c"))
+      )
     );
   }
 
   #[gtest]
   fn mul_left_associativity() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = a * b * c
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "a * b * c";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(
-          bin_exp(id_exp(ident("a")), &BinaryOp::Mul, id_exp(ident("b"))),
-          &BinaryOp::Mul,
-          id_exp(ident("c"))
-        )
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
+        bin_exp(id_exp(ident("a")), &BinaryOp::Mul, id_exp(ident("b"))),
+        &BinaryOp::Mul,
+        id_exp(ident("c"))
+      )
     );
   }
 
   #[gtest]
   fn add_sub_equal_precedence() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let add_sub = a + b - c
-          let sub_add = a - b + c
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "a + b - c";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![
-        let_stmt(
-          ident("add_sub"),
-          bin_exp(
-            bin_exp(id_exp(ident("a")), &BinaryOp::Add, id_exp(ident("b"))),
-            &BinaryOp::Sub,
-            id_exp(ident("c"))
-          )
-        ),
-        let_stmt(
-          ident("sub_add"),
-          bin_exp(
-            bin_exp(id_exp(ident("a")), &BinaryOp::Sub, id_exp(ident("b"))),
-            &BinaryOp::Add,
-            id_exp(ident("c"))
-          )
-        )
-      ])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
+        bin_exp(id_exp(ident("a")), &BinaryOp::Add, id_exp(ident("b"))),
+        &BinaryOp::Sub,
+        id_exp(ident("c"))
+      )
+    );
+
+    let expr = "a - b + c";
+    expect_that!(
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
+        bin_exp(id_exp(ident("a")), &BinaryOp::Sub, id_exp(ident("b"))),
+        &BinaryOp::Add,
+        id_exp(ident("c"))
+      )
     );
   }
 
   #[gtest]
   fn mul_higher_precedence() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = a + b * c - d / e
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "a + b * c - d / e";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
         bin_exp(
-          bin_exp(
-            id_exp(ident("a")),
-            &BinaryOp::Add,
-            bin_exp(id_exp(ident("b")), &BinaryOp::Mul, id_exp(ident("c")))
-          ),
-          &BinaryOp::Sub,
-          bin_exp(id_exp(ident("d")), &BinaryOp::Div, id_exp(ident("e")))
-        )
-      )])))
+          id_exp(ident("a")),
+          &BinaryOp::Add,
+          bin_exp(id_exp(ident("b")), &BinaryOp::Mul, id_exp(ident("c")))
+        ),
+        &BinaryOp::Sub,
+        bin_exp(id_exp(ident("d")), &BinaryOp::Div, id_exp(ident("e")))
+      )
     );
   }
 
@@ -874,209 +934,125 @@ mod tests {
 
   #[gtest]
   fn call_expr() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = y() + z()
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "y() + z()";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(
-          call_expression(all![
-            call_expr_target(id_exp(ident("y"))),
-            call_expr_args(is_empty())
-          ]),
-          &BinaryOp::Add,
-          call_expression(all![
-            call_expr_target(id_exp(ident("z"))),
-            call_expr_args(is_empty())
-          ]),
-        )
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
+        call_expression(all![
+          call_expr_target(id_exp(ident("y"))),
+          call_expr_args(is_empty())
+        ]),
+        &BinaryOp::Add,
+        call_expression(all![
+          call_expr_target(id_exp(ident("z"))),
+          call_expr_args(is_empty())
+        ]),
+      )
     );
   }
 
   #[gtest]
   fn call_expr_with_args() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = y(1) + z(w, 2 + 3)
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "y(1) + z(w, 2 + 3)";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        bin_exp(
-          call_expression(all![
-            call_expr_target(id_exp(ident("y"))),
-            call_expr_args(elements_are![lit_exp(integral("1"))])
-          ]),
-          &BinaryOp::Add,
-          call_expression(all![
-            call_expr_target(id_exp(ident("z"))),
-            call_expr_args(elements_are![
-              id_exp(ident("w")),
-              bin_exp(
-                lit_exp(integral("2")),
-                &BinaryOp::Add,
-                lit_exp(integral("3"))
-              )
-            ])
-          ]),
-        )
-      )])))
+      parse_single_exp(expr).unwrap(),
+      bin_exp(
+        call_expression(all![
+          call_expr_target(id_exp(ident("y"))),
+          call_expr_args(elements_are![lit_exp(integral("1"))])
+        ]),
+        &BinaryOp::Add,
+        call_expression(all![
+          call_expr_target(id_exp(ident("z"))),
+          call_expr_args(elements_are![
+            id_exp(ident("w")),
+            bin_exp(
+              lit_exp(integral("2")),
+              &BinaryOp::Add,
+              lit_exp(integral("3"))
+            )
+          ])
+        ]),
+      )
     );
   }
 
   #[gtest]
   fn dot_expr() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = y.z
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "y.z";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        all![
-          dot_expr_base(id_exp(ident("y"))),
-          dot_expr_member(ident("z"))
-        ]
-      )])))
+      parse_single_exp(expr).unwrap(),
+      all![
+        dot_expr_base(id_exp(ident("y"))),
+        dot_expr_member(ident("z"))
+      ]
     );
   }
 
   #[gtest]
   fn call_dot_expr() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = y.z()
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "y.z()";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        call_expression(all![
-          call_expr_target(all![
-            dot_expr_base(id_exp(ident("y"))),
-            dot_expr_member(ident("z"))
-          ]),
-          call_expr_args(is_empty())
-        ])
-      )])))
+      parse_single_exp(expr).unwrap(),
+      call_expression(all![
+        call_expr_target(all![
+          dot_expr_base(id_exp(ident("y"))),
+          dot_expr_member(ident("z"))
+        ]),
+        call_expr_args(is_empty())
+      ])
     );
   }
 
   #[gtest]
   fn call_paren_expr() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = (y.z)()
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "(y.z)()";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        call_expression(all![
-          call_expr_target(all![
-            dot_expr_base(id_exp(ident("y"))),
-            dot_expr_member(ident("z"))
-          ]),
-          call_expr_args(is_empty())
-        ])
-      )])))
+      parse_single_exp(expr).unwrap(),
+      call_expression(all![
+        call_expr_target(all![
+          dot_expr_base(id_exp(ident("y"))),
+          dot_expr_member(ident("z"))
+        ]),
+        call_expr_args(is_empty())
+      ])
     );
   }
 
   #[gtest]
   fn dot_paren_expr() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = (x + 3).y
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "(x + 3).y";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        all![
-          dot_expr_base(bin_exp(
-            id_exp(ident("x")),
-            &BinaryOp::Add,
-            lit_exp(integral("3"))
-          )),
-          dot_expr_member(ident("y"))
-        ]
-      )])))
+      parse_single_exp(expr).unwrap(),
+      all![
+        dot_expr_base(bin_exp(
+          id_exp(ident("x")),
+          &BinaryOp::Add,
+          lit_exp(integral("3"))
+        )),
+        dot_expr_member(ident("y"))
+      ]
     );
   }
 
   #[gtest]
   fn chained_dot_expr() {
-    let ast = JangGrammar::parse_fallible(lex_stream(
-      r#"
-        fn function_name() {
-          let x = a.b.c().d
-        }
-        "#
-      .chars(),
-    ))
-    .unwrap();
-
+    let expr = "a.b.c().d";
     expect_that!(
-      ast,
-      jang_file_with_fn(fn_body(block(elements_are![let_stmt(
-        ident("x"),
-        all![
-          dot_expr_base(call_expression(all![
-            call_expr_target(all![
-              dot_expr_base(all![
-                dot_expr_base(id_exp(ident("a"))),
-                dot_expr_member(ident("b"))
-              ]),
-              dot_expr_member(ident("c"))
+      parse_single_exp(expr).unwrap(),
+      all![
+        dot_expr_base(call_expression(all![
+          call_expr_target(all![
+            dot_expr_base(all![
+              dot_expr_base(id_exp(ident("a"))),
+              dot_expr_member(ident("b"))
             ]),
-            call_expr_args(is_empty())
-          ])),
-          dot_expr_member(ident("d"))
-        ]
-      )])))
+            dot_expr_member(ident("c"))
+          ]),
+          call_expr_args(is_empty())
+        ])),
+        dot_expr_member(ident("d"))
+      ]
     );
   }
 

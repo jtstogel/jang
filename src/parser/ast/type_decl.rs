@@ -1,58 +1,23 @@
 use std::fmt::Display;
 
-use cknittel_util::{builder::Builder, from_variants::FromVariants};
+use cknittel_util::from_variants::FromVariants;
 
-use crate::parser::{ast::type_expr::TypeExpression, token::ident::Ident};
-
-#[derive(Clone, Debug)]
-pub struct StructuredTypeField {
-  name: Ident,
-  ty: TypeExpression,
-}
-
-impl StructuredTypeField {
-  pub fn new(name: Ident, ty: TypeExpression) -> Self {
-    Self { name, ty }
-  }
-}
-
-impl Display for StructuredTypeField {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}: {}", self.name, self.ty)
-  }
-}
-
-#[derive(Clone, Debug, Builder)]
-pub struct StructuredTypeDecl {
-  #[vec]
-  fields: Vec<StructuredTypeField>,
-}
-
-impl StructuredTypeDecl {
-  pub fn fields(&self) -> &[StructuredTypeField] {
-    &self.fields
-  }
-}
-
-impl Display for StructuredTypeDecl {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    writeln!(f, "{{")?;
-    for field in &self.fields {
-      writeln!(f, "{field}")?;
-    }
-    write!(f, "}}")
-  }
-}
+use crate::parser::{
+  ast::{enum_type_decl::EnumTypeDecl, structured_type_decl::StructuredTypeDecl},
+  token::ident::Ident,
+};
 
 #[derive(Clone, Debug, FromVariants)]
 pub enum TypeDeclVariant {
   Structured(StructuredTypeDecl),
+  Enum(EnumTypeDecl),
 }
 
 impl Display for TypeDeclVariant {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Self::Structured(structured) => write!(f, "{structured}"),
+      Self::Enum(enum_decl) => write!(f, "{enum_decl}"),
     }
   }
 }
@@ -64,8 +29,7 @@ pub struct TypeDecl {
 }
 
 impl TypeDecl {
-  pub fn new(name: Ident, decl: impl Into<TypeDeclVariant>) -> Self {
-    let decl = decl.into();
+  pub fn new(name: Ident, decl: TypeDeclVariant) -> Self {
     Self { name, decl }
   }
 }
@@ -80,22 +44,13 @@ impl Display for TypeDecl {
 pub(crate) mod matchers {
   use crate::parser::{
     ast::{
-      type_decl::{StructuredTypeDecl, StructuredTypeField, TypeDecl, TypeDeclVariant},
-      type_expr::TypeExpression,
+      enum_type_decl::{EnumTypeDecl, EnumVariant},
+      structured_type_decl::StructuredTypeField,
+      type_decl::{StructuredTypeDecl, TypeDecl, TypeDeclVariant},
     },
     token::ident::Ident,
   };
   use googletest::prelude::*;
-
-  pub fn type_field<'a>(
-    name: impl Matcher<&'a Ident>,
-    field_type: impl Matcher<&'a TypeExpression>,
-  ) -> impl Matcher<&'a StructuredTypeField> {
-    pat!(StructuredTypeField {
-      name: name,
-      ty: field_type,
-    })
-  }
 
   pub fn structured_type<'a>(
     name: impl Matcher<&'a Ident>,
@@ -106,6 +61,19 @@ pub(crate) mod matchers {
       decl: pat!(TypeDeclVariant::Structured(property!(
         &StructuredTypeDecl.fields(),
         field_matchers
+      ))),
+    })
+  }
+
+  pub fn enum_type<'a>(
+    name: impl Matcher<&'a Ident>,
+    variant_matchers: impl Matcher<&'a [EnumVariant]>,
+  ) -> impl Matcher<&'a TypeDecl> {
+    pat!(TypeDecl {
+      name: name,
+      decl: pat!(TypeDeclVariant::Enum(property!(
+        &EnumTypeDecl.variants(),
+        variant_matchers
       ))),
     })
   }

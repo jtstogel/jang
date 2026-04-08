@@ -103,7 +103,7 @@ dependencies = [
 [[package]]
 name = "lr_table"
 version = "0.1.0"
-source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=b7edae88e9f3a3e0f332532bd347f471a707005d#b7edae88e9f3a3e0f332532bd347f471a707005d"
+source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=260c45648771ebb0fe8f14359705950ff4ad7d6b#260c45648771ebb0fe8f14359705950ff4ad7d6b"
 dependencies = [
  "cknittel-util",
  "googletest",
@@ -126,18 +126,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "parser-user-error"
+version = "0.1.0"
+source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=260c45648771ebb0fe8f14359705950ff4ad7d6b#260c45648771ebb0fe8f14359705950ff4ad7d6b"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "parser_generator"
 version = "0.1.0"
-source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=b7edae88e9f3a3e0f332532bd347f471a707005d#b7edae88e9f3a3e0f332532bd347f471a707005d"
+source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=260c45648771ebb0fe8f14359705950ff4ad7d6b#260c45648771ebb0fe8f14359705950ff4ad7d6b"
 dependencies = [
  "googletest",
+ "parser-user-error",
  "parser_generator_impl",
 ]
 
 [[package]]
 name = "parser_generator_impl"
 version = "0.1.0"
-source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=b7edae88e9f3a3e0f332532bd347f471a707005d#b7edae88e9f3a3e0f332532bd347f471a707005d"
+source = "git+https://github.com/ClaytonKnittel/parser_generator.git?rev=260c45648771ebb0fe8f14359705950ff4ad7d6b#260c45648771ebb0fe8f14359705950ff4ad7d6b"
 dependencies = [
  "cknittel-util",
  "itertools",

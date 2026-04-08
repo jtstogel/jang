@@ -4,7 +4,8 @@ use std::{
   fmt::{Debug, Display},
 };
 
-use parser_generator::error::ParserError;
+use cknittel_util::builder::error::BuilderError;
+use parser_generator::{ParserUserError, error::ParserError};
 
 use crate::{interpreter::error::InterpreterError, source_location::SourceLocation};
 
@@ -40,41 +41,45 @@ impl Debug for ParseError {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, ParserUserError)]
 #[allow(clippy::enum_variant_names)]
 pub enum JangError {
-  ParseError(ParseError),
-  GrammarError(ParserError<Infallible>),
-  InterpreterError(InterpreterError),
+  Parse(ParseError),
+  Grammar(ParserError<Infallible>),
+  Builder(BuilderError),
+  Interpret(InterpreterError),
 }
 
 impl JangError {
   pub fn parse_error(message: impl Into<String>, source_location: SourceLocation) -> Self {
-    Self::ParseError(ParseError::new(message, source_location))
+    Self::Parse(ParseError::new(message, source_location))
   }
 }
 
 impl From<ParserError<JangError>> for JangError {
   fn from(value: ParserError<JangError>) -> Self {
     match value {
-      ParserError::InputStreamError(err) => err,
+      ParserError::UserError(err) => err,
       ParserError::ParseError { message } => {
-        JangError::GrammarError(ParserError::ParseError { message })
-      }
-      ParserError::ForeignError { message } => {
-        JangError::GrammarError(ParserError::ForeignError { message })
+        JangError::Grammar(ParserError::ParseError { message })
       }
       #[cfg(debug_assertions)]
       ParserError::OverlappingTokenMatchers { token } => {
-        JangError::GrammarError(ParserError::OverlappingTokenMatchers { token })
+        JangError::Grammar(ParserError::OverlappingTokenMatchers { token })
       }
     }
   }
 }
 
+impl From<BuilderError> for JangError {
+  fn from(value: BuilderError) -> Self {
+    JangError::Builder(value)
+  }
+}
+
 impl From<InterpreterError> for JangError {
   fn from(err: InterpreterError) -> Self {
-    JangError::InterpreterError(err)
+    JangError::Interpret(err)
   }
 }
 
@@ -83,9 +88,10 @@ impl Error for JangError {}
 impl Display for JangError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::ParseError(err) => write!(f, "{err}"),
-      Self::GrammarError(err) => write!(f, "Grammar error: {err}"),
-      Self::InterpreterError(err) => write!(f, "Interpreter error: {err}"),
+      Self::Parse(err) => write!(f, "{err}"),
+      Self::Grammar(err) => write!(f, "Grammar error: {err}"),
+      Self::Builder(err) => write!(f, "Builder error: {err}"),
+      Self::Interpret(err) => write!(f, "Grammar error: {err}"),
     }
   }
 }
