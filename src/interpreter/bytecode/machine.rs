@@ -173,6 +173,7 @@ impl<'a> JitCallFrame<'a> {
       BinaryOp::Mul => lhs.multiply(&rhs)?,
       BinaryOp::Div => lhs.divide(&rhs)?,
       BinaryOp::Mod => lhs.modulo(&rhs)?,
+      op => return Err(InterpreterError::unimplemented(format!("{op}"))),
     };
     self.stack.push_value(value);
     Ok(())

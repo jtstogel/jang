@@ -170,7 +170,12 @@ pub_grammar!(
     LoopStatement::new(#block_scope)
   };
 
-  <expr>: Expression => <add_expr>;
+  <expr>: Expression => <comparison_expr>;
+
+  <comparison_expr>: Expression => <add_expr> <comparator> <add_expr> {
+    BinaryExpression::new(#0, #2, #comparator).into()
+  };
+  <comparison_expr>: Expression => <add_expr>;
 
   <add_expr>: Expression => <add_expr> <plus> <mul_expr> {
     BinaryExpression::new(#add_expr, #mul_expr, BinaryOp::Add).into()
@@ -239,6 +244,13 @@ pub_grammar!(
     builder.add_parameters(FunctionParameter::new(#ident, #type_expr))
   };
 
+  <comparator>: BinaryOp => <greater_than> { BinaryOp::GreaterThan };
+  <comparator>: BinaryOp => <greater_than_equal> { BinaryOp::GreaterThanEqual };
+  <comparator>: BinaryOp => <less_than> { BinaryOp::LessThan };
+  <comparator>: BinaryOp => <less_than_equal> { BinaryOp::LessThanEqual };
+  <comparator>: BinaryOp => <double_equal> { BinaryOp::Equal };
+  <comparator>: BinaryOp => <not_equal> { BinaryOp::NotEqual };
+
   <eq> => Operator(Operator { op: Op::Equal });
   <open_paren> => Operator(Operator { op: Op::OpenParen });
   <close_paren> => Operator(Operator { op: Op::CloseParen });
@@ -249,6 +261,13 @@ pub_grammar!(
   <mul> => Operator(Operator { op: Op::Star });
   <div> => Operator(Operator { op: Op::Slash });
   <modulo> => Operator(Operator { op: Op::Percent });
+  <greater_than> => Operator(Operator { op: Op::GreaterThan });
+  <greater_than_equal> => <greater_than> Joint <eq>;
+  <less_than> => Operator(Operator { op: Op::LessThan });
+  <less_than_equal> => <less_than> Joint <eq>;
+  <double_equal> => <eq> Joint <eq>;
+  <not_equal> => <bang> Joint <eq>;
+  <bang> => Operator(Operator { op: Op::Bang });
   <colon> => Operator(Operator { op: Op::Colon });
   <comma> => Operator(Operator { op: Op::Comma });
   <dot> => Operator(Operator { op: Op::Dot });
@@ -278,8 +297,6 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-  use std::{error::Error, fmt::Debug};
-
   use googletest::prelude::*;
   use parser_generator::parser::Parser;
 
@@ -321,6 +338,7 @@ mod tests {
       token::{ident::matchers::ident, literal::matchers::integral},
     },
   };
+  use std::{error::Error, fmt::Debug};
 
   fn failed_to_parse<'a, T: Debug, E: Error>() -> impl Matcher<&'a std::result::Result<T, E>> {
     err(displays_as(contains_substring("Failed to parse")))
@@ -1054,6 +1072,88 @@ mod tests {
         dot_expr_member(ident("d"))
       ]
     );
+  }
+
+  #[gtest]
+  fn comparison_less_than() {
+    expect_that!(
+      parse_single_exp("1 < 2").unwrap(),
+      bin_exp(
+        lit_exp(integral("1")),
+        &BinaryOp::LessThan,
+        lit_exp(integral("2"))
+      )
+    );
+  }
+
+  #[gtest]
+  fn comparison_less_than_equal() {
+    expect_that!(
+      parse_single_exp("1 <= 2").unwrap(),
+      bin_exp(
+        lit_exp(integral("1")),
+        &BinaryOp::LessThanEqual,
+        lit_exp(integral("2"))
+      )
+    );
+  }
+
+  #[gtest]
+  fn comparison_greater_than() {
+    expect_that!(
+      parse_single_exp("1 > 2").unwrap(),
+      bin_exp(
+        lit_exp(integral("1")),
+        &BinaryOp::GreaterThan,
+        lit_exp(integral("2"))
+      )
+    );
+  }
+
+  #[gtest]
+  fn comparison_greater_than_equal() {
+    expect_that!(
+      parse_single_exp("1 >= 2").unwrap(),
+      bin_exp(
+        lit_exp(integral("1")),
+        &BinaryOp::GreaterThanEqual,
+        lit_exp(integral("2"))
+      )
+    );
+  }
+
+  #[gtest]
+  fn comparison_equal_to() {
+    expect_that!(
+      parse_single_exp("1 == 2").unwrap(),
+      bin_exp(
+        lit_exp(integral("1")),
+        &BinaryOp::Equal,
+        lit_exp(integral("2"))
+      )
+    );
+  }
+
+  #[gtest]
+  fn comparison_not_equal_to() {
+    expect_that!(
+      parse_single_exp("1 != 2").unwrap(),
+      bin_exp(
+        lit_exp(integral("1")),
+        &BinaryOp::NotEqual,
+        lit_exp(integral("2"))
+      )
+    );
+  }
+
+  #[gtest]
+  fn comparison_equal_does_not_parse() {
+    expect_that!(parse_single_exp("1 = 2"), err(anything()));
+  }
+
+  #[gtest]
+  fn chained_comparison_not_allowed() {
+    expect_that!(parse_single_exp("1 < 3 > 2"), err(anything()));
   }
 
   #[gtest]

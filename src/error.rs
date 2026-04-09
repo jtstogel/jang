@@ -91,7 +91,7 @@ impl Display for JangError {
       Self::Parse(err) => write!(f, "{err}"),
       Self::Grammar(err) => write!(f, "Grammar error: {err}"),
       Self::Builder(err) => write!(f, "Builder error: {err}"),
-      Self::Interpret(err) => write!(f, "Grammar error: {err}"),
+      Self::Interpret(err) => write!(f, "Interpret error: {err}"),
     }
   }
 }

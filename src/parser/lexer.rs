@@ -113,7 +113,7 @@ impl<I: Iterator<Item = char>> TokenIter<I> {
       }
       Some(
         first_char @ ('=' | ',' | '(' | ')' | '{' | '}' | '-' | '<' | '>' | ':' | '+' | '*' | '/'
-        | '%' | '|'),
+        | '%' | '|' | '!'),
       ) => Ok(Some(self.parse_operator(first_char))),
       Some(ch) => Err(JangError::parse_error(
         format!("Unexpected symbol '{ch}'"),
@@ -299,6 +299,58 @@ mod tests {
   }
 
   #[gtest]
+  fn test_joint_equal_to() {
+    let text = "==";
+
+    let tokens = lex_stream(text.chars()).collect_result_vec();
+    expect_that!(
+      tokens,
+      ok(elements_are![operator!(Equal), joint(), operator!(Equal)])
+    );
+  }
+
+  #[gtest]
+  fn test_joint_not_equal() {
+    let text = "!=";
+
+    let tokens = lex_stream(text.chars()).collect_result_vec();
+    expect_that!(
+      tokens,
+      ok(elements_are![operator!(Bang), joint(), operator!(Equal)])
+    );
+  }
+
+  #[gtest]
+  fn test_joint_greater_than_equal() {
+    let text = ">=";
+
+    let tokens = lex_stream(text.chars()).collect_result_vec();
+    expect_that!(
+      tokens,
+      ok(elements_are![
+        operator!(GreaterThan),
+        joint(),
+        operator!(Equal)
+      ])
+    );
+  }
+
+  #[gtest]
+  fn test_joint_less_than_equal() {
+    let text = "<=";
+
+    let tokens = lex_stream(text.chars()).collect_result_vec();
+    expect_that!(
+      tokens,
+      ok(elements_are![
+        operator!(LessThan),
+        joint(),
+        operator!(Equal)
+      ])
+    );
+  }
+
+  #[gtest]
   fn test_joint_close_open_paren() {
     let text = ")(";
 
@@ -324,7 +376,7 @@ mod tests {
 
   #[gtest]
   fn test_other_operators() {
-    let text = "= , ( ) { } - < > : . + * / % |";
+    let text = "= , ( ) { } - < > ! : . + * / % |";
 
     let tokens = lex_stream(text.chars()).collect_result_vec();
     expect_that!(
@@ -339,6 +391,7 @@ mod tests {
         operator!(Dash),
         operator!(LessThan),
         operator!(GreaterThan),
+        operator!(Bang),
         operator!(Colon),
         operator!(Dot),
         operator!(Plus),

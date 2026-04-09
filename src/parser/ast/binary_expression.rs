@@ -9,6 +9,12 @@ pub enum BinaryOp {
   Mul,
   Div,
   Mod,
+  Equal,
+  GreaterThan,
+  GreaterThanEqual,
+  LessThan,
+  LessThanEqual,
+  NotEqual,
 }
 
 impl Display for BinaryOp {
@@ -17,11 +23,17 @@ impl Display for BinaryOp {
       f,
       "{}",
       match self {
-        Self::Add => '+',
-        Self::Sub => '-',
-        Self::Mul => '*',
-        Self::Div => '/',
-        Self::Mod => '%',
+        Self::Add => "+",
+        Self::Sub => "-",
+        Self::Mul => "*",
+        Self::Div => "/",
+        Self::Mod => "%",
+        Self::Equal => "==",
+        Self::GreaterThan => ">",
+        Self::GreaterThanEqual => ">=",
+        Self::LessThan => "<",
+        Self::LessThanEqual => "<=",
+        Self::NotEqual => "!=",
       }
     )
   }
