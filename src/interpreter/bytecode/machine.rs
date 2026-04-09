@@ -63,6 +63,7 @@ impl<'a> JitInstructionBlockCursor<'a> {
     let idx = self.instr_index;
     self.instr_index += 1;
 
+    debug_assert!(idx <= self.block.instructions().len());
     if let Some(instr) = self.block.instructions().get(idx) {
       CurrentInstruction::Instr(instr)
     } else {
