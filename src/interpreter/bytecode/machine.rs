@@ -80,14 +80,20 @@ struct JitCallFrame<'a> {
 
 // Actions that affect which call frames are on the stack.
 enum FrameAction<'a> {
+  // Does nothing.
   Continue,
+
+  // Pushes a call frame and transitions execution to target_fn.
   Call {
     target_fn: &'a JitCompiledFunction<'a>,
     args: Vec<Value<'a>>,
   },
+
+  // Pops a call frame and passes its return value to the callee.
   Return(Value<'a>),
 }
 
+// A single call frame.
 impl<'a> JitCallFrame<'a> {
   fn from_call(
     jit_fn: &'a JitCompiledFunction<'a>,
@@ -118,6 +124,7 @@ impl<'a> JitCallFrame<'a> {
     Ok(())
   }
 
+  // Executes a single instruction.
   fn step(
     &mut self,
     context: &'a impl JitFunctionContext<'a>,
@@ -230,6 +237,7 @@ impl<'a> Machine<'a> {
     Ok(())
   }
 
+  // Executes a single instruction.
   fn step(
     &mut self,
     context: &'a impl JitFunctionContext<'a>,
